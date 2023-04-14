@@ -23,6 +23,13 @@ public class Paxos implements PaxosRMI, Runnable {
     AtomicBoolean unreliable; // for testing
 
     // Your data here
+    Object value;
+    int highestPrepare;
+    int highestAccept;
+    Object acceptedValue;
+    int seq;
+    boolean decided;
+    int decidedSeq;
 
     /**
      * Call the constructor to create a Paxos peer.
@@ -39,6 +46,10 @@ public class Paxos implements PaxosRMI, Runnable {
         this.unreliable = new AtomicBoolean(false);
 
         // Your initialization code here
+        value = null;
+        highestPrepare = -1;
+        highestAccept = -1;
+        acceptedValue = -1;
 
         // register peers, do not modify this part
         try {
@@ -103,23 +114,75 @@ public class Paxos implements PaxosRMI, Runnable {
      * is reached.
      */
     public void Start(int seq, Object value) {
-        // Your code here
+        // Your code here - basically call this.run after initializing parameters
+        this.value = value;
+        this.seq = seq;
+        Thread t = new Thread(this);
+        t.start();
+        return;
     }
 
     @Override
     public void run() {
         //Your code here
+        /*
+        PSEUDOCODE FROM CANVAS
+        1: proposer(v):
+        2: while not decided: do
+        3: choose n, unique and higher than any n seen so far
+        4: send prepare(n) to all servers including self
+        5: if prepare ok(n, na, va) from majority then
+        6: v′ = va with highest na; choose own v otherwise
+        7: send accept(n, v′) to all
+        8: if accept ok(n) from majority then
+        9: send decided(v′) to all
+        10: end if
+        11: end if
+        12: end while
+         */
+        //while(!.equals(decided)){
+        //}
+        int sequence = this.seq;
+        Object value = this.value;
     }
 
     // RMI Handler for prepare requests
     public Response Prepare(Request req) {
         // your code here
+        /*
+        PSEUDOCODE FROM CANVAS
+        18: acceptor’s prepare(n) handler:
+        19: if n > np then
+        20: np = n
+        21: reply prepare ok(n, na, va)
+        22: else
+        23: reply prepare reject
+        24: end if
+        */
+       if(req.sequenceNum > this.highestPrepare){
+            this.highestPrepare = req.sequenceNum;
+            Call("Prepare", )
+       }
+       
         return null;
     }
 
     // RMI Handler for accept requests
     public Response Accept(Request req) {
         // your code here
+        /*
+        PSEUDCODE FROM CANVAS
+        26: acceptor’s accept(n, v) handler:
+        27: if n >= np then
+        28: np = n
+        29: na = n
+        30: va = v
+        31: reply accept ok(n)
+        32: else
+        33: reply accept reject
+        34: end if
+
+         */
         return null;
     }
 
@@ -191,6 +254,12 @@ public class Paxos implements PaxosRMI, Runnable {
      */
     public retStatus Status(int seq) {
         // Your code here
+        /*
+        PSEUDOCODE FROM CANVAS
+        14: acceptor’s state:
+        15: np (highest prepare seen)
+        16: na, va (highest accept seen)
+         */
         return null;
     }
 

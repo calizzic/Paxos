@@ -11,6 +11,14 @@ import java.io.Serializable;
 public class Request implements Serializable {
     static final long serialVersionUID = 1L;
     // Your data here
+    int sequenceNum;
+    int proposalNum;
+    Object value;
 
     // Your constructor and methods here
+    public Request(int sequenceNum, int proposalNum, Object value){
+        this.sequenceNum = sequenceNum;
+        this.proposalNum = proposalNum;
+        this.value = value;
+    }
 }

@@ -10,6 +10,13 @@ import java.io.Serializable;
 public class Response implements Serializable {
     static final long serialVersionUID = 2L;
     // Your data here
-
+    boolean accept;
+    int number;
+    Object value;
     // Your constructor and methods here
+    public Response(boolean accept, int number, Object value){
+        this.accept = accept;
+        this.number = number;
+        this.value = value;
+    }
 }
