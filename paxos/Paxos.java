@@ -3,6 +3,9 @@ package paxos;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.server.UnicastRemoteObject;
 import java.rmi.registry.Registry;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -23,13 +26,11 @@ public class Paxos implements PaxosRMI, Runnable {
     AtomicBoolean unreliable; // for testing
 
     // Your data here
+    //Is highest prepare/accept for all sequence numbers or is it unique to each sequence number?
+    //Something to store dones
     Object value;
-    int highestPrepare;
-    int highestAccept;
-    Object acceptedValue;
-    int seq;
-    boolean decided;
-    int decidedSeq;
+    int sequenceNum;
+    HashMap<Integer, SequenceState> sequences;
 
     /**
      * Call the constructor to create a Paxos peer.
@@ -46,10 +47,10 @@ public class Paxos implements PaxosRMI, Runnable {
         this.unreliable = new AtomicBoolean(false);
 
         // Your initialization code here
+        sequences = new HashMap<Integer,SequenceState>();
         value = null;
-        highestPrepare = -1;
-        highestAccept = -1;
-        acceptedValue = -1;
+        sequenceNum = -1;
+        
 
         // register peers, do not modify this part
         try {
@@ -116,7 +117,7 @@ public class Paxos implements PaxosRMI, Runnable {
     public void Start(int seq, Object value) {
         // Your code here - basically call this.run after initializing parameters
         this.value = value;
-        this.seq = seq;
+        this.sequenceNum = seq;
         Thread t = new Thread(this);
         t.start();
         return;
@@ -125,7 +126,7 @@ public class Paxos implements PaxosRMI, Runnable {
     @Override
     public void run() {
         //Your code here
-        /*
+        /*  
         PSEUDOCODE FROM CANVAS
         1: proposer(v):
         2: while not decided: do
@@ -142,8 +143,77 @@ public class Paxos implements PaxosRMI, Runnable {
          */
         //while(!.equals(decided)){
         //}
-        int sequence = this.seq;
+        //Parameter passing for thread run (Will be messed up if multiple runs called ASAP but we don't need to worry ab that)
+        int sequence = this.sequenceNum;
         Object value = this.value;
+        SequenceState thisState = new SequenceState(sequence);
+        sequences.put(sequence, thisState);
+        while(thisState.state != State.Decided){
+            int max = thisState.highestPrepare;
+            int n = ((max / 100) +1) * 100 + me;
+            Request r = new Request(sequence, n);
+            ArrayList<Response> responses = new ArrayList<Response>();
+            Response response;
+            int acceptCount = 0; 
+            for(int i = 0; i< ports.length; i++){
+                if(i!=me){
+                    response = Call("Prepare", r, i);
+                }else{
+                    response = this.Prepare(r);
+                }
+                if(response != null){
+                    responses.add(response);
+                
+                    if(response.accept){
+                        acceptCount +=1;
+                    }
+                }
+            }
+            if(acceptCount > ports.length/2){
+                int highestNa = -1;
+                int highestIndex = -1;
+                for(int i = 0; i<responses.size(); i++){
+                    int na = responses.get(i).number;
+                    if(na>highestNa){
+                        highestNa = na;
+                        highestIndex = i;
+                    }
+                }
+                Object newValue = null;
+                if(highestNa > -1){
+                    newValue = responses.get(highestIndex).value;
+                }else{
+                    newValue = value;
+                }
+                r = new Request(sequence, n, newValue);
+                Response acceptance;
+                acceptCount = 0; 
+                for(int i = 0; i< ports.length; i++){
+                    if(i!=me){
+                        acceptance = Call("Accept", r, i);
+                    }else{
+                        acceptance= this.Accept(r);
+                    }
+                    if(acceptance != null){
+                        if(acceptance.accept){
+                            acceptCount +=1;
+                        }
+                    }
+                }
+                if(acceptCount > ports.length/2){
+                    for(int i = 0; i< ports.length; i++){
+                        if(i!=me){
+                            acceptance = Call("Decide", r, i);
+                        }else{
+                            acceptance= this.Decide(r);
+                        }
+                    }
+                }
+
+            }
+        }
+
+
     }
 
     // RMI Handler for prepare requests
@@ -159,13 +229,23 @@ public class Paxos implements PaxosRMI, Runnable {
         23: reply prepare reject
         24: end if
         */
-       if(req.sequenceNum > this.highestPrepare){
-            this.highestPrepare = req.sequenceNum;
-            Call("Prepare", )
-       }
-       
-        return null;
+        int sequence = req.sequenceNum;
+        if(!sequences.containsKey(sequence)){
+            sequences.put(sequence, new SequenceState(sequence));
+        }
+        int highestPrepare = sequences.get(sequence).highestPrepare;
+        //todo: CHANGE THAT ^ highest prepare/accept = something else, not sure what tho
+        int n = req.proposalNum;
+        if(n > highestPrepare){
+            sequences.get(sequence).highestPrepare = n;
+            //send prepareOk to all peers
+            return new Response(true, sequences.get(sequence).highestAccept, sequences.get(sequence).acceptedValue);
+        }
+        else{
+            return new Response(false, n, null);
+        }
     }
+
 
     // RMI Handler for accept requests
     public Response Accept(Request req) {
@@ -183,12 +263,31 @@ public class Paxos implements PaxosRMI, Runnable {
         34: end if
 
          */
-        return null;
+        int sequence = req.sequenceNum;
+        if(!sequences.containsKey(sequence)){
+            sequences.put(sequence, new SequenceState(sequence));
+        }
+        int highestPrepare = sequences.get(sequence).highestPrepare;
+        //todo: CHANGE THAT ^ highest prepare/accept = something else, not sure what tho
+        int n = req.proposalNum;
+        if(n >= highestPrepare){
+            sequences.get(sequence).highestAccept = n;
+            sequences.get(sequence).highestPrepare = n;
+            sequences.get(sequence).acceptedValue = req.value;
+            //send prepareOk to all peers
+            return new Response(true, n, null);
+        }else{
+            return new Response(false, n, null);
+        }
     }
 
     // RMI Handler for decide requests
     public Response Decide(Request req) {
         // your code here
+        System.out.println("Process:  " + me + " deciding on value " + req.value + " for sequence " + req.sequenceNum);
+        sequences.get(req.sequenceNum).acceptedValue = req.value;
+        sequences.get(req.sequenceNum).state = State.Decided;
+        System.out.println("Process:  " + me + " state " + sequences.get(req.sequenceNum).state + " for sequence " + req.sequenceNum);
         return null;
     }
 
@@ -199,7 +298,8 @@ public class Paxos implements PaxosRMI, Runnable {
      * see the comments for Min() for more explanation.
      */
     public void Done(int seq) {
-        // Your code here
+        
+
     }
 
     /**
@@ -208,8 +308,14 @@ public class Paxos implements PaxosRMI, Runnable {
      * this peer.
      */
     public int Max() {
-        // Your code here
-        return -1;
+        Set<Integer> allSeqNums = sequences.keySet();
+        Integer maxSeqNum = -2147483648;
+        for (Integer seqNum : allSeqNums){
+            if(seqNum > maxSeqNum){
+                maxSeqNum = seqNum;
+            }
+        }
+        return 100;
     }
 
     /**
@@ -242,7 +348,14 @@ public class Paxos implements PaxosRMI, Runnable {
      */
     public int Min() {
         // Your code here
-        return -1;
+        Set<Integer> allSeqNums = sequences.keySet();
+        Integer minSeqNum = 2147483647;
+        for (Integer seqNum : allSeqNums){
+            if(seqNum < minSeqNum){
+                minSeqNum = seqNum;
+            }
+        }
+        return 0;
     }
 
     /**
@@ -260,7 +373,12 @@ public class Paxos implements PaxosRMI, Runnable {
         15: np (highest prepare seen)
         16: na, va (highest accept seen)
          */
-        return null;
+        if(!sequences.containsKey(seq)){
+            System.out.println("No sequences for key " + seq);
+            sequences.put(seq, new SequenceState(seq));
+        }
+        System.out.println("Returning as state " + sequences.get(seq).state + " for sequence " + seq + " in process " + me);
+        return new retStatus(sequences.get(seq).state, sequences.get(seq).acceptedValue);
     }
 
     /**
@@ -304,3 +422,8 @@ public class Paxos implements PaxosRMI, Runnable {
         return this.unreliable.get();
     }
 }
+
+
+
+
+   

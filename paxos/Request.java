@@ -21,4 +21,9 @@ public class Request implements Serializable {
         this.proposalNum = proposalNum;
         this.value = value;
     }
+
+    public Request(int sequenceNum, int proposalNum){
+        this.sequenceNum = sequenceNum;
+        this.proposalNum = proposalNum;
+    }
 }
