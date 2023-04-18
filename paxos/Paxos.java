@@ -26,11 +26,12 @@ public class Paxos implements PaxosRMI, Runnable {
     AtomicBoolean unreliable; // for testing
 
     // Your data here
-    //Is highest prepare/accept for all sequence numbers or is it unique to each sequence number?
+    //Is highest prepare/accept for all sequence numbers or is it unique to each sequence number? Unique to each sequence number
     //Something to store dones
     Object value;
     int sequenceNum;
     HashMap<Integer, SequenceState> sequences;
+    int[] peerDone;
 
     /**
      * Call the constructor to create a Paxos peer.
@@ -50,7 +51,10 @@ public class Paxos implements PaxosRMI, Runnable {
         sequences = new HashMap<Integer,SequenceState>();
         value = null;
         sequenceNum = -1;
-        
+        peerDone = new int[peers.length];
+        for(int i = 0; i<peerDone.length; i++){
+            peerDone[i] = -1;
+        }
 
         // register peers, do not modify this part
         try {
@@ -151,7 +155,7 @@ public class Paxos implements PaxosRMI, Runnable {
         while(thisState.state != State.Decided){
             int max = thisState.highestPrepare;
             int n = ((max / 100) +1) * 100 + me;
-            Request r = new Request(sequence, n);
+            Request r = new Request(sequence, n, peerDone);
             ArrayList<Response> responses = new ArrayList<Response>();
             Response response;
             int acceptCount = 0; 
@@ -167,6 +171,8 @@ public class Paxos implements PaxosRMI, Runnable {
                     if(response.accept){
                         acceptCount +=1;
                     }
+
+                    this.maxPeerDone(response.peerDone);
                 }
             }
             if(acceptCount > ports.length/2){
@@ -185,7 +191,7 @@ public class Paxos implements PaxosRMI, Runnable {
                 }else{
                     newValue = value;
                 }
-                r = new Request(sequence, n, newValue);
+                r = new Request(sequence, n, newValue, peerDone);
                 Response acceptance;
                 acceptCount = 0; 
                 for(int i = 0; i< ports.length; i++){
@@ -195,17 +201,22 @@ public class Paxos implements PaxosRMI, Runnable {
                         acceptance= this.Accept(r);
                     }
                     if(acceptance != null){
+                        this.maxPeerDone(acceptance.peerDone);
                         if(acceptance.accept){
                             acceptCount +=1;
                         }
                     }
                 }
                 if(acceptCount > ports.length/2){
+                    r = new Request(sequence, n, newValue, peerDone);
                     for(int i = 0; i< ports.length; i++){
                         if(i!=me){
                             acceptance = Call("Decide", r, i);
                         }else{
                             acceptance= this.Decide(r);
+                        }
+                        if(acceptance != null){
+                            this.maxPeerDone(acceptance.peerDone);
                         }
                     }
                 }
@@ -229,9 +240,12 @@ public class Paxos implements PaxosRMI, Runnable {
         23: reply prepare reject
         24: end if
         */
+        this.maxPeerDone(req.peerDone);
+
         int sequence = req.sequenceNum;
         if(!sequences.containsKey(sequence)){
             sequences.put(sequence, new SequenceState(sequence));
+            System.out.println("Added Sequence: " + sequence + " to sequences for process: " + me);
         }
         int highestPrepare = sequences.get(sequence).highestPrepare;
         //todo: CHANGE THAT ^ highest prepare/accept = something else, not sure what tho
@@ -239,10 +253,10 @@ public class Paxos implements PaxosRMI, Runnable {
         if(n > highestPrepare){
             sequences.get(sequence).highestPrepare = n;
             //send prepareOk to all peers
-            return new Response(true, sequences.get(sequence).highestAccept, sequences.get(sequence).acceptedValue);
+            return new Response(true, sequences.get(sequence).highestAccept, sequences.get(sequence).acceptedValue, peerDone);
         }
         else{
-            return new Response(false, n, null);
+            return new Response(false, -1, null, peerDone);
         }
     }
 
@@ -263,9 +277,11 @@ public class Paxos implements PaxosRMI, Runnable {
         34: end if
 
          */
+        this.maxPeerDone(req.peerDone);
         int sequence = req.sequenceNum;
         if(!sequences.containsKey(sequence)){
             sequences.put(sequence, new SequenceState(sequence));
+            System.out.println("Added Sequence: " + sequence + " to sequences for process: " + me);
         }
         int highestPrepare = sequences.get(sequence).highestPrepare;
         //todo: CHANGE THAT ^ highest prepare/accept = something else, not sure what tho
@@ -275,19 +291,20 @@ public class Paxos implements PaxosRMI, Runnable {
             sequences.get(sequence).highestPrepare = n;
             sequences.get(sequence).acceptedValue = req.value;
             //send prepareOk to all peers
-            return new Response(true, n, null);
+            return new Response(true, n, null, peerDone);
         }else{
-            return new Response(false, n, null);
+            return new Response(false, n, null, peerDone);
         }
     }
 
     // RMI Handler for decide requests
     public Response Decide(Request req) {
-        // your code here
-        System.out.println("Process:  " + me + " deciding on value " + req.value + " for sequence " + req.sequenceNum);
+        //System.out.println("Process:  " + me + " deciding on value " + req.value + " for sequence " + req.sequenceNum);
+        this.maxPeerDone(req.peerDone);
         sequences.get(req.sequenceNum).acceptedValue = req.value;
         sequences.get(req.sequenceNum).state = State.Decided;
-        System.out.println("Process:  " + me + " state " + sequences.get(req.sequenceNum).state + " for sequence " + req.sequenceNum);
+        System.out.println("Process:  " + me + " state " + sequences.get(req.sequenceNum).state + " for sequence " + req.sequenceNum + "with value " + req.value);
+        //this.Status(req.sequenceNum);
         return null;
     }
 
@@ -298,8 +315,7 @@ public class Paxos implements PaxosRMI, Runnable {
      * see the comments for Min() for more explanation.
      */
     public void Done(int seq) {
-        
-
+        peerDone[me] = seq;
     }
 
     /**
@@ -309,13 +325,13 @@ public class Paxos implements PaxosRMI, Runnable {
      */
     public int Max() {
         Set<Integer> allSeqNums = sequences.keySet();
-        Integer maxSeqNum = -2147483648;
+        Integer maxSeqNum = -1;
         for (Integer seqNum : allSeqNums){
             if(seqNum > maxSeqNum){
                 maxSeqNum = seqNum;
             }
         }
-        return 100;
+        return maxSeqNum;
     }
 
     /**
@@ -348,14 +364,18 @@ public class Paxos implements PaxosRMI, Runnable {
      */
     public int Min() {
         // Your code here
-        Set<Integer> allSeqNums = sequences.keySet();
-        Integer minSeqNum = 2147483647;
-        for (Integer seqNum : allSeqNums){
-            if(seqNum < minSeqNum){
-                minSeqNum = seqNum;
+        int min = -1;
+        for(int i = 0;i<peerDone.length;i++){
+            if (peerDone[i]<min){
+                min = peerDone[i];
             }
         }
-        return 0;
+        for(int i=0;i<min;i++){
+            if(sequences.containsKey(i)){
+                sequences.get(i).state = State.Forgotten;
+            }
+        }
+        return min + 1;
     }
 
     /**
@@ -377,7 +397,7 @@ public class Paxos implements PaxosRMI, Runnable {
             System.out.println("No sequences for key " + seq);
             sequences.put(seq, new SequenceState(seq));
         }
-        System.out.println("Returning as state " + sequences.get(seq).state + " for sequence " + seq + " in process " + me);
+        //System.out.println("Returning as state " + sequences.get(seq).state + " for sequence " + seq + " in process " + me);
         return new retStatus(sequences.get(seq).state, sequences.get(seq).acceptedValue);
     }
 
@@ -420,6 +440,14 @@ public class Paxos implements PaxosRMI, Runnable {
 
     public boolean isunreliable() {
         return this.unreliable.get();
+    }
+
+    public void maxPeerDone(int[] other){
+        for(int i =0; i< other.length && i<peerDone.length; i++){
+            if(other[i]>peerDone[i]){
+                peerDone[i] = other[i];
+            }
+        }
     }
 }
 

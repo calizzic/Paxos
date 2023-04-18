@@ -13,10 +13,12 @@ public class Response implements Serializable {
     boolean accept;
     int number;
     Object value;
+    int[] peerDone;
     // Your constructor and methods here
-    public Response(boolean accept, int number, Object value){
+    public Response(boolean accept, int number, Object value, int[] peerDone){
         this.accept = accept;
         this.number = number;
         this.value = value;
+        this.peerDone = peerDone;
     }
 }
